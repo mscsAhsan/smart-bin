@@ -1,55 +1,101 @@
-# Dataset
+# Smart Bin — AI-Based Waste Segregation System
 
-## Source
+A conveyor-based waste-sorting prototype that photographs each item, classifies it
+with a YOLOv8 classification model, and routes it into the correct bin with servo
+actuators. Built as a BS Artificial Intelligence final-year project at the Islamia
+University of Bahawalpur (2022–2026), self-funded from pocket money.
 
-**RealWaste** — Single, Iranmanesh & Raad, *Information* 2023, 14(12), 633.
-DOI: 10.3390/info14120633 (also on IEEE DataPort, DOI 10.21227/65m5-rr72, and UCI).
-Licence: **CC BY-NC-SA 4.0**. 4,752 images, 524×524, photographed at Whyte's
-Gully, Wollongong, Australia.
+**Authors:** Muhammad Ahsan Shah (Information Technology University, Lahore),
+Afifa (Government College Women University, Bahawalpur), Tayyaba Noor
+(Namal University, Mianwali)
 
-Kaggle: https://www.kaggle.com/datasets/joebeachcapital/realwaste
+**Paper:** `paper/smart-bin-ieee-conference-paper.docx` — submitted to ICECT 2027
+(5th International Conference on Engineering and Computing Technologies, NUML
+Islamabad, 18–19 March 2027).
 
-The dataset images themselves are **not** included in this repo. Download
-RealWaste from the link above and apply the remap below.
+## Results (verified)
 
-## 9-class → 4-class remap
-
-| Our class | RealWaste classes merged in |
+| Metric | Value |
 |---|---|
-| Paper | Paper (500) |
-| Plastic | Plastic (921) |
-| Food | Food Organics (411) |
-| Others | Cardboard (461), Glass (420), Metal (790), Miscellaneous Trash (495), Textile Trash (318), Vegetation (436) |
+| Classifier test top-1 accuracy (1,032 images) | **95.06%** |
+| Classifier validation top-1 accuracy | 95.91% |
+| Physical sorting accuracy (40 items on the conveyor) | **85.0% (34/40)** |
+| Model | YOLOv8n-cls, 30 epochs, 224×224, Tesla T4 (~23 min) |
+| Inference latency (T4, model only) | mean 14 ms, p95 31 ms |
 
-Local phone photos (~71 per class, ~284 total) were added on top.
+The 6 physical-sorting errors were traced to poorly resolved ESP32-CAM captures
+causing misclassification — not to servo/mechanical failures. Classifier accuracy
+and physical sorting accuracy are different measurements and are never averaged.
 
-## Counts as measured in our folders
+Per-class test results (precision / recall / F1): Paper .965 / .993 / .979,
+Plastic .937 / .885 / .910 (weakest — 34 plastic↔Others confusions),
+Food .982 / .991 / .986, Others .924 / .937 / .930. See `results/` for the
+confusion matrix, per-class chart, threshold sweep and training curves.
 
-| Class | Images |
-|---|---|
-| Paper | 1,831 |
-| Plastic | 1,674 |
-| Food | 1,461 |
-| Others | 1,885 |
-| **Total** | **6,851** |
+![Prototype](figures/hardware_prototype.jpg)
 
-Split used for training: stratified 70/15/15 (seed 42) — train 4,793 / val 1,026 /
-test 1,032. See `training/yolov8-smart-bin-retrain-colab.ipynb`.
+## How it works
 
-## Provenance note (honest, in progress)
+```
+Waste on conveyor → HC-SR04 ultrasonic sensor (<20 cm)
+  → Arduino sends "D" → ESP32-CAM captures a frame (HTTP /capture)
+  → Desktop app (Python + Ultralytics YOLO + OpenCV + Tkinter)
+     classifies into Plastic / Paper / Food / Others
+  → single-char command (P / A / F / O) over serial @ 9600 baud
+  → Arduino drives the conveyor + one of 3 SG90 servos
+  → item lands in its bin; confidence < 60% → Others (fail-safe)
+```
 
-A plain remap of RealWaste (4,752) plus ~284 phone photos accounts for 5,036
-images, so **1,815 images in our folders are not yet explained** by those two
-sources (possible augmentation / duplicates / an additional source — not yet
-confirmed). `training/provenance-audit-colab.ipynb` checks for exact duplicates
-(MD5), near-duplicates (perceptual hash) and train/val/test leakage; run it on
-`realwaste1.zip` and see the audit output before citing the counts. The paper
-states this gap openly in its Limitations section.
+## Hardware
 
-## Attribution
+- Arduino Uno + L298N motor driver + 12 V DC gear motor (conveyor)
+- ESP32-CAM (AI-Thinker, OV2640) — captures only; YOLO runs on the PC
+- HC-SR04 ultrasonic sensor, 3× SG90 servos, 16×2 I2C LCD
 
-If you use this dataset, cite:
+## Repository layout
 
-> Single, A., Iranmanesh, S., & Raad, A. (2023). RealWaste: A Novel Real-Life
-> Dataset for Landfill Waste Classification. *Information*, 14(12), 633.
-> https://doi.org/10.3390/info14120633
+```
+arduino/        Arduino Uno firmware (sensor, conveyor, servos)
+esp32/          ESP32-CAM firmware (capture server)
+desktop-app/    Python classifier + Tkinter GUI (smart_bin_yolov8l_v4.py)
+training/       Retraining notebook (Colab) + provenance-audit notebook
+dataset/        Dataset notes: RealWaste remap, counts, licence
+results/        Confusion matrix, per-class metrics, threshold sweep, curves
+figures/        Prototype photo, GUI screenshot
+paper/          IEEE conference paper (ICECT 2027 submission version, 6 pp.)
+```
+
+## Setup
+
+1. Flash `esp32/ESP32Code.ino` to the ESP32-CAM and `arduino/ArduinoCode.ino`
+   to the Arduino Uno. **Replace `<YOUR_WIFI_SSID>` / `<YOUR_WIFI_PASSWORD>`
+   in the ESP32 code and the camera IP in `desktop-app/smart_bin_yolov8l_v4.py`
+   with your own values** — no credentials are stored in this repo.
+2. Install dependencies: `pip install ultralytics opencv-python pyserial`
+   (plus `tkinter`, usually bundled with Python).
+3. Place a trained `best.pt` next to the desktop app and run
+   `python desktop-app/smart_bin_yolov8l_v4.py`.
+
+> Which ESP32 sketch is final (`ESP32Code.ino` vs `esp32/sketch_dec25b.ino`,
+> an older/alternate version) is not yet confirmed — `ESP32Code.ino` is the
+> presumed final one.
+
+## Dataset
+
+The classifier was trained on a 4-class remap of **RealWaste** (Single, Iranmanesh
+& Raad, *Information* 2023, 14(12), 633, DOI: 10.3390/info14120633), plus local
+phone photos. Our prepared 4-class copy (`realwaste1.zip`, 6,851 images, ~487 MB):
+
+https://drive.google.com/file/d/195VK0WUYTPdnCXFdH0YHNOoF44A8O8f1/view?usp=sharing
+
+See `dataset/README.md` for the remap, counts and licence (CC BY-NC-SA 4.0).
+The dataset images themselves are **not** in this repo — download RealWaste from
+[Kaggle](https://www.kaggle.com/datasets/joebeachcapital/realwaste) or our
+prepared copy from the Drive link above.
+
+## Licence
+
+Code in this repo is released under the MIT Licence (see `LICENSE`). The
+RealWaste dataset remains under its own CC BY-NC-SA 4.0 licence — if you use
+the dataset, cite Single et al. (2023) and respect the non-commercial,
+share-alike terms.
